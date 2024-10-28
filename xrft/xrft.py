@@ -36,7 +36,7 @@ def _fft_module(da):
         return np.fft
 
 
-def _apply_window(da, dims, window_type="hann"):
+def _apply_window(da, dims, window_type="hann", window_kwargs={}):
     """Creating windows in dimensions dims."""
 
     if window_type == True:
@@ -84,9 +84,11 @@ def _apply_window(da, dims, window_type="hann"):
 
     if da.chunks:
 
-        def dask_win_func(n, sym=False):
+        def dask_win_func(n, sym=False, **window_kwargs):
             return dsar.from_delayed(
-                delayed(scipy_win_func, pure=True)(n, sym=sym), (n,), float
+                delayed(scipy_win_func, pure=True)(n, sym=sym, **window_kwargs),
+                (n,),
+                float,
             )
 
         win_func = dask_win_func
@@ -95,7 +97,9 @@ def _apply_window(da, dims, window_type="hann"):
 
     windows = [
         xr.DataArray(
-            win_func(len(da[d]), sym=False), dims=da[d].dims, coords=da[d].coords
+            win_func(len(da[d]), sym=False, **window_kwargs),
+            dims=da[d].dims,
+            coords=da[d].coords,
         )
         for d in dims
     ]
@@ -312,6 +316,7 @@ def fft(
     shift=True,
     detrend=None,
     window=None,
+    window_kwargs={},
     true_phase=True,
     true_amplitude=True,
     chunks_to_segments=False,
@@ -350,6 +355,8 @@ def fft(
         Whether to apply a window to the data before the Fourier
         transform is taken. A window will be applied to all the dimensions in
         dim. Please follow `scipy.signal.windows`' naming convention.
+    window_kwargs : dict, optional
+        Extra keyword arguments to pass through to the windowing function.
     true_phase : bool, optional
         If set to False, standard fft algorithm is applied on signal without consideration of coordinates.
         If set to True, coordinates location are correctly taken into account to evaluate Fourier Tranforrm phase and
@@ -430,7 +437,7 @@ def fft(
             da = _detrend(da, dim, detrend_type=detrend)
 
     if window is not None:
-        _, da = _apply_window(da, dim, window_type=window)
+        _, da = _apply_window(da, dim, window_type=window, window_kwargs=window_kwargs)
 
     if true_phase:
         reversed_axis = [
@@ -646,12 +653,12 @@ def ifft(
     )  # Do nothing if daft was not transposed
 
 
-def _window_correction_factor(da, dim, scaling, window):
+def _window_correction_factor(da, dim, scaling, window, window_kwargs):
     if window is None:
         raise ValueError(
             "window_correction can only be applied when windowing is turned on."
         )
-    windows, _ = _apply_window(da, dim, window_type=window)
+    windows, _ = _apply_window(da, dim, window_type=window, window_kwargs=window_kwargs)
     if scaling == "density":
         return (windows**2).mean()
     elif scaling == "spectrum":
@@ -744,7 +751,9 @@ def power_spectrum(
 
     if scaling != "false_density":  # Corresponds to density=False
         if window_correction:
-            ps /= _window_correction_factor(da, dim, scaling, kwargs.get("window"))
+            ps /= _window_correction_factor(
+                da, dim, scaling, kwargs.get("window"), kwargs.get("window_kwargs", {})
+            )
         ps *= _psd_scaling_factor(ps, updated_dims, scaling)
 
     return ps
@@ -829,7 +838,9 @@ def cross_spectrum(
 
     if scaling != "false_density":  # Corresponds to density=False
         if window_correction:
-            cs /= _window_correction_factor(da1, dim, scaling, kwargs.get("window"))
+            cs /= _window_correction_factor(
+                da1, dim, scaling, kwargs.get("window"), kwargs.get("window_kwargs", {})
+            )
         cs *= _psd_scaling_factor(cs, updated_dims, scaling)
 
     return cs
